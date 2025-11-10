@@ -1,0 +1,903 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Digital Dialog</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: system-ui, sans-serif;
+            max-width: 900px;
+            margin: 40px auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        h1 { font-size: 1.5em; margin: 0; }
+        .header-container { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 20px; }
+        .header-right { display: flex; gap: 15px; align-items: center; flex-wrap: wrap; }
+        select { padding: 8px 12px; border: 1px solid #ccc; border-radius: 4px; cursor: pointer; }
+        select:focus { outline: 2px solid #0066cc; outline-offset: 2px; }
+        .tabs { display: flex; gap: 10px; border-bottom: 2px solid #ddd; overflow-x: auto; }
+        .tab {
+            padding: 12px 24px;
+            border: none;
+            background: none;
+            font-size: 24px;
+            font-weight: bold;
+            color: #666;
+            border-bottom: 4px solid transparent;
+            cursor: pointer;
+        }
+        .tab:hover, .tab.active { color: #0066cc; }
+        .tab.active { border-bottom-color: #0066cc; }
+        .tab-content, .dialogue-container { display: none; }
+        .tab-content.active, .dialogue-container.active { display: block; }
+        .chapter-item, .quiz-question {
+            padding: 15px;
+            margin: 10px 0;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+        .chapter-item:hover { background: #f5f5f5; border-color: #0066cc; }
+        .chapter-item.selected { border-color: #0066cc; }
+        .dialogue-line {
+            margin: 15px 0;
+            padding: 10px;
+            white-space: pre-wrap;
+            line-height: 1.8;
+        }
+        .dialogue-line.highlight { background: #ffc; border-radius: 4px; }
+        .speaker-first { font-weight: bold; color: #0066cc; }
+        .speaker-second { font-weight: bold; color: #cc6600; }
+        .answer-option {
+            display: block;
+            padding: 12px;
+            margin: 8px 0;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        .answer-option:hover { background: #f5f5f5; }
+        .controls, .quiz-score { position: sticky; top: 0; background: white; padding: 15px; text-align: center; z-index: 10; }
+        .controls { border-bottom: 2px solid #0066cc; }
+        .quiz-score { border: 2px solid #0066cc; border-radius: 8px; margin-bottom: 20px; }
+        button {
+            padding: 12px 24px;
+            margin: 5px;
+            border: none;
+            border-radius: 4px;
+            background: #0066cc;
+            color: white;
+            cursor: pointer;
+        }
+        button:hover { filter: brightness(0.9); }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+        .back-button { background: #666; }
+        .quiz-question { cursor: default; }
+        .quiz-question.answered-correct { border-color: #28a745; background: #f0f9f0; }
+        .quiz-question.answered-incorrect { border-color: #dc3545; background: #fff5f5; }
+        .answer-option.correct { border-color: #28a745; background: #e7f4e7; }
+        .answer-option.incorrect { border-color: #dc3545; background: #fce8e8; }
+        .answer-option input { margin-right: 10px; }
+        .rationale { margin-top: 15px; padding: 15px; background: #f0f7ff; border-left: 4px solid #0066cc; display: none; }
+        .rationale.show { display: block; }
+    </style>
+</head>
+<body>
+    <div class="header-container">
+        <h1 id="main-title">Digital Dialog</h1>
+        <div class="header-right">
+            <div class="lang-selector">
+                <select id="lang-dropdown" onchange="switchLanguage(this.value)">
+                    <option value="en">🇺🇸 English</option>
+                    <option value="pl">🇵🇱 Polski</option>
+                </select>
+            </div>
+            <div class="copyright">
+                &copy; <a href="https://github.com/marcindulak/digital-dialog">marcindulak</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="tabs">
+        <button class="tab active" onclick="showTab('learn')"></button>
+        <button class="tab" onclick="showTab('quiz')"></button>
+    </div>
+
+    <div id="learn-tab" class="tab-content active">
+        <div id="chapter-list" class="chapter-list"></div>
+
+        <div id="dialogue-container" class="dialogue-container">
+            <div id="dialogue-encouragement" style="display: none;"></div>
+            <div class="controls"></div>
+            <div id="dialogue-content"></div>
+        </div>
+    </div>
+
+    <div id="quiz-tab" class="tab-content">
+        <div id="quiz-chapter-list" class="chapter-list"></div>
+        <div id="quiz-container" style="display: none;">
+            <div id="quiz-score" class="quiz-score"></div>
+            <button class="back-button" onclick="showQuizChapterList()"></button>
+            <div id="quiz-content"></div>
+            <div class="submit-quiz">
+                <button onclick="checkAnswers()"></button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+
+        var chapters = [];
+        var selectedChapter = null;
+        var currentLang = 'pl';  // Default language
+
+        // Centralized language configuration
+        // To add a new language, add an entry here and create README.{lang}.md
+        var languageConfig = {
+            'pl': {
+                speechCode: 'pl-PL',
+                speakers: {
+                    first: 'Ostrożna',
+                    second: 'Ciekawska'
+                },
+                keywords: {
+                    references: 'Źródła',
+                    quiz: 'Sprawdzian',
+                    type: 'Typ',
+                    answer: 'Odpowiedź',
+                    explanation: 'Wyjaśnienie',
+                    explanations: 'Wyjaśnienia',
+                    trueValue: 'Prawda',
+                    falseValue: 'Fałsz',
+                    trueFalseType: 'prawda-fałsz',
+                    multipleChoiceType: 'wielokrotny-wybór'
+                },
+                ui: {
+                    tabLearning: 'Nauka',
+                    tabQuiz: 'Test',
+                    selectChapter: 'Wybierz rozdział:',
+                    duration: 'Czas trwania:',
+                    encouragement: 'Odegraj tę rozmowę ze znajomym lub ją odsłuchaj!',
+                    playDialogue: '🔊 Odsłuchaj rozmowę',
+                    pause: '⏸️ Pauza',
+                    resume: '▶️ Wznów',
+                    backToList: '← Powrót do listy',
+                    selectQuizChapter: 'Wybierz rozdział:',
+                    numQuestions: 'Liczba pytań:',
+                    checkAnswers: 'Sprawdź odpowiedzi',
+                    backToChapters: '← Powrót do listy rozdziałów',
+                    score: 'Wynik:',
+                    correct: 'poprawnych',
+                    answerThenCheck: 'Odpowiedz na pytania, a potem kliknij "Sprawdź odpowiedzi"',
+                    loadError: 'Błąd ładowania',
+                    noDialogues: 'Nie znaleziono dialogów',
+                    browserNoSpeech: 'Twoja przeglądarka nie obsługuje syntezy mowy.',
+                    quizTrue: 'Prawda',
+                    quizFalse: 'Fałsz'
+                }
+            },
+            'en': {
+                speechCode: 'en-US',
+                speakers: {
+                    first: 'Wary',
+                    second: 'Curious'
+                },
+                keywords: {
+                    references: 'References',
+                    quiz: 'Quiz',
+                    type: 'Type',
+                    answer: 'Answer',
+                    explanation: 'Explanation',
+                    explanations: 'Explanations',
+                    trueValue: 'True',
+                    falseValue: 'False',
+                    trueFalseType: 'true-false',
+                    multipleChoiceType: 'multiple-choice'
+                },
+                ui: {
+                    tabLearning: 'Learning',
+                    tabQuiz: 'Quiz',
+                    selectChapter: 'Select a chapter:',
+                    duration: 'Duration:',
+                    encouragement: 'Act out this dialogue with someone or listen to it!',
+                    playDialogue: '🔊 Play dialogue',
+                    pause: '⏸️ Pause',
+                    resume: '▶️ Resume',
+                    backToList: '← Back to list',
+                    selectQuizChapter: 'Select a chapter:',
+                    numQuestions: 'Number of questions:',
+                    checkAnswers: 'Check answers',
+                    backToChapters: '← Back to chapter list',
+                    score: 'Score:',
+                    correct: 'correct',
+                    answerThenCheck: 'Answer the questions, then click "Check answers"',
+                    loadError: 'Error loading',
+                    noDialogues: 'No dialogues found',
+                    browserNoSpeech: 'Your browser does not support speech synthesis.',
+                    quizTrue: 'True',
+                    quizFalse: 'False'
+                }
+            }
+        };
+
+        async function switchLanguage(lang) {
+            currentLang = lang;
+
+            // Update URL parameter
+            const url = new URL(window.location);
+            url.searchParams.set('lang', lang);
+            window.history.pushState({}, '', url);
+
+            // Update dropdown selection
+            document.getElementById('lang-dropdown').value = lang;
+
+            // Remember current view state
+            const wasInDialogue = selectedChapter !== null && document.getElementById('dialogue-container').classList.contains('active');
+            const wasInQuiz = selectedQuizChapter !== null && document.getElementById('quiz-container').style.display !== 'none';
+            const savedDialogueChapter = selectedChapter;
+            const savedQuizChapter = selectedQuizChapter;
+
+            // Clear user answers and selections
+            userAnswers = {};
+            selectedChapter = null;
+            selectedQuizChapter = null;
+
+            // Update UI text
+            updateUIText();
+
+            // Reload content and wait for it to complete
+            await loadREADME();
+
+            // Restore view state after content loads
+            if (wasInDialogue && savedDialogueChapter !== null && chapters[savedDialogueChapter]) {
+                selectChapter(savedDialogueChapter);
+            } else if (wasInQuiz && savedQuizChapter !== null && chapters[savedQuizChapter]) {
+                // Re-render quiz with cleared answers in new language
+                selectQuizChapter(savedQuizChapter, false);
+            }
+        }
+
+        function updateUIText() {
+            const text = languageConfig[currentLang].ui;
+
+            // Update tabs
+            document.querySelectorAll('.tab')[0].textContent = text.tabLearning;
+            document.querySelectorAll('.tab')[1].textContent = text.tabQuiz;
+
+            // Update quiz buttons
+            const quizBackButton = document.querySelector('#quiz-container .back-button');
+            if (quizBackButton) {
+                quizBackButton.textContent = text.backToChapters;
+            }
+            const submitButton = document.querySelector('.submit-quiz button');
+            if (submitButton) {
+                submitButton.textContent = text.checkAnswers;
+            }
+        }
+
+        function getURLLanguage() {
+            const params = new URLSearchParams(window.location.search);
+            return params.get('lang') || 'pl';
+        }
+
+        async function loadREADME() {
+            try {
+                const response = await fetch(`README.${currentLang}.md`);
+                const text = await response.text();
+                parseContent(text);
+                displayChapterList();
+            } catch (error) {
+                const text = languageConfig[currentLang].ui;
+                document.getElementById('chapter-list').innerHTML =
+                    `<p style="color: red;">${text.loadError} README.${currentLang}.md: ${error.message}</p>`;
+            }
+        }
+
+        function parseContent(markdown) {
+            chapters = [];
+            const lines = markdown.split('\n');
+            let currentChapter = null;
+            let currentLine = null;
+            let inReferences = false;
+            let inQuiz = false;
+            let inQuizDetails = false;
+            let currentQuestion = null;
+
+            // Get language-specific keywords for parsing
+            const config = languageConfig[currentLang];
+            const keywords = config.keywords;
+
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i].trim();
+
+                // Detect chapter headings (## Rozdział or ## Chapter)
+                if (line.startsWith('## ')) {
+                    if (currentChapter && currentChapter.lines.length > 0) {
+                        chapters.push(currentChapter);
+                    }
+                    currentChapter = {
+                        title: line.replace('##', '').trim(),
+                        lines: [],
+                        references: [],
+                        questions: []
+                    };
+                    inReferences = false;
+                    inQuiz = false;
+                    currentLine = null;
+                    continue;
+                }
+
+                // Detect references section
+                if (line.startsWith(`### ${keywords.references}`)) {
+                    inReferences = true;
+                    inQuiz = false;
+                    continue;
+                }
+
+                // Detect quiz section
+                if (line.startsWith(`### ${keywords.quiz}`)) {
+                    inReferences = false;
+                    inQuiz = true;
+                    continue;
+                }
+
+                // Parse reference items
+                if (inReferences && currentChapter && line.length > 0) {
+                    // Match pattern like [1] Reference text...
+                    const refMatch = line.match(/^\[(\d+)\]\s*(.+)/);
+                    if (refMatch) {
+                        currentChapter.references.push({
+                            number: refMatch[1],
+                            text: refMatch[2]
+                        });
+                    }
+                    continue;
+                }
+
+                // Parse quiz questions in <details>
+                if (inQuiz && line.includes('<details>')) {
+                    inQuizDetails = true;
+                    currentQuestion = {
+                        type: '',
+                        question: '',
+                        correct: [],
+                        answers: [],
+                        rationale: '',
+                        rationales: []
+                    };
+                    continue;
+                }
+
+                if (inQuiz && inQuizDetails && line.includes('</details>')) {
+                    if (currentQuestion && currentChapter) {
+                        currentChapter.questions.push(currentQuestion);
+                    }
+                    inQuizDetails = false;
+                    currentQuestion = null;
+                    continue;
+                }
+
+                // Parse quiz question details
+                if (inQuiz && inQuizDetails && currentQuestion) {
+                    if (line.includes('<summary>')) {
+                        const match = line.match(/.*: (.+)<\/summary>/);
+                        if (match) {
+                            currentQuestion.question = match[1];
+                        }
+                    } else if (line.startsWith(`**${keywords.type}:**`)) {
+                        const type = line.replace(`**${keywords.type}:**`, '').trim();
+                        currentQuestion.type = type;
+                    } else if (line.startsWith(`**${keywords.answer}:**`)) {
+                        const answer = line.replace(`**${keywords.answer}:**`, '').trim();
+                        if (answer === keywords.trueValue) {
+                            currentQuestion.correct = [true];
+                        } else if (answer === keywords.falseValue) {
+                            currentQuestion.correct = [false];
+                        }
+                    } else if (line.startsWith(`**${keywords.explanation}:**`)) {
+                        currentQuestion.rationale = line.replace(`**${keywords.explanation}:**`, '').trim();
+                    } else if (line.startsWith('- ✓')) {
+                        const answer = line.replace('- ✓', '').trim();
+                        currentQuestion.correct.push(currentQuestion.answers.length);
+                        currentQuestion.answers.push(answer);
+                    } else if (line.startsWith('- ✗')) {
+                        const answer = line.replace('- ✗', '').trim();
+                        currentQuestion.answers.push(answer);
+                    } else if (line.startsWith(`**${keywords.explanations}:**`)) {
+                        // Section header for explanations - skip it
+                        continue;
+                    } else if (line.startsWith('- ') && currentQuestion.answers.length > 0) {
+                        // Explanation line (simple bullet point after we've already collected answers)
+                        const rationale = line.replace(/^- /, '').trim();
+                        currentQuestion.rationales.push(rationale);
+                    }
+                    continue;
+                }
+
+                // Parse dialogue lines (not in references or quiz section)
+                if (!inReferences && !inQuiz && currentChapter) {
+                    // Match speaker pattern like **Ostrożna:** or **Character:**
+                    const speakerMatch = line.match(/\*\*([^*]+):\*\* (.+)/);
+                    if (speakerMatch) {
+                        currentLine = {
+                            speaker: speakerMatch[1],
+                            text: speakerMatch[2]
+                        };
+                        currentChapter.lines.push(currentLine);
+                    }
+                    // Accumulate multi-line dialogue
+                    else if (line.length > 0 && currentLine) {
+                        currentLine.text += '\n' + line;
+                    }
+                }
+            }
+
+            // Push last chapter
+            if (currentChapter && currentChapter.lines.length > 0) {
+                chapters.push(currentChapter);
+            }
+
+            displayChapterList();
+            displayQuizChapterList();
+        }
+
+        function estimateDuration(chapter) {
+            // Calculate total text length
+            const totalChars = chapter.lines.reduce((sum, line) => sum + line.text.length, 0);
+
+            // Estimate duration based on speech synthesis rate of 0.95
+            // Approximately 850 characters per minute at this rate
+            const charsPerMinute = 850;
+            const minutes = Math.ceil(totalChars / charsPerMinute);
+
+            return `${minutes} min`;
+        }
+
+        function displayChapterList() {
+            const text = languageConfig[currentLang].ui;
+
+            if (chapters.length === 0) {
+                document.getElementById('chapter-list').innerHTML =
+                    `<p>${text.noDialogues}</p>`;
+                return;
+            }
+
+            let html = `<h2>${text.selectChapter}</h2>`;
+            chapters.forEach((chapter, chapterIndex) => {
+                html += `<div class="chapter-item" onclick="selectChapter(${chapterIndex})">`;
+                html += `<div class="chapter-title">${chapter.title}</div>`;
+                html += `<div>${text.duration} ${estimateDuration(chapter)}</div>`;
+                html += `</div>`;
+            });
+
+            document.getElementById('chapter-list').innerHTML = html;
+        }
+
+        function convertReferencesToSuperscript(text) {
+            // Convert [1], [2], etc. to superscript
+            return text.replace(/\[(\d+)\]/g, '<sup>[$1]</sup>');
+        }
+
+        function convertMarkdownLinks(text) {
+            // Convert markdown links [text](url) to HTML links
+            return text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+        }
+
+        function convertMarkdownFormatting(text) {
+            // Convert markdown bold and italic to HTML
+            return text
+                .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')  // **bold**
+                .replace(/\*([^*]+)\*/g, '<em>$1</em>');              // *italic*
+        }
+
+        function selectChapter(chapterIndex) {
+            selectedChapter = chapterIndex;
+            const chapter = chapters[chapterIndex];
+            const config = languageConfig[currentLang];
+            const text = config.ui;
+
+            // Display encouragement box (first thing visible)
+            const encouragementDiv = document.getElementById('dialogue-encouragement');
+            encouragementDiv.innerHTML = `<div style="background: white; padding: 15px; border: 2px solid #0066cc; border-radius: 8px; margin-bottom: 20px; text-align: center; font-size: 1.1em; font-style: italic;">${text.encouragement}</div>`;
+            encouragementDiv.style.display = 'block';
+
+            // Update controls with current language
+            const controls = document.querySelector('#dialogue-container .controls');
+            controls.innerHTML = `
+                <button onclick="playSelectedDialogue()">${text.playDialogue}</button>
+                <button id="pause-button" onclick="togglePause()">${text.pause}</button>
+                <button class="back-button" onclick="showChapterList()">${text.backToList}</button>
+            `;
+
+            // Display chapter title and dialogue
+            let html = `<h2>${chapter.title}</h2>`;
+            chapter.lines.forEach((line, lineIdx) => {
+                // Assign speaker classes: first speaker gets blue, second speaker gets orange
+                const speakerClass = (line.speaker === config.speakers.first)
+                    ? 'speaker-first' : 'speaker-second';
+                html += `<div class="dialogue-line" id="line-${lineIdx}">`;
+                const formattedText = convertMarkdownFormatting(convertReferencesToSuperscript(line.text));
+                html += `<span class="${speakerClass}">${line.speaker}:</span> ${formattedText}`;
+                html += `</div>`;
+            });
+
+            // Display references section if any
+            if (chapter.references && chapter.references.length > 0) {
+                html += `<div style="margin-top: 30px; padding: 20px; background: #f9f9f9; border-left: 4px solid #0066cc; border-radius: 4px;">`;
+                html += `<h3 style="margin-top: 0;">${config.keywords.references}</h3>`;
+                chapter.references.forEach(reference => {
+                    html += `<p style="margin: 10px 0;"><strong>[${reference.number}]</strong> ${convertMarkdownLinks(reference.text)}</p>`;
+                });
+                html += `</div>`;
+            }
+
+            document.getElementById('dialogue-content').innerHTML = html;
+            document.getElementById('chapter-list').style.display = 'none';
+            document.getElementById('dialogue-container').classList.add('active');
+        }
+
+        function showChapterList() {
+            stopSpeaking();
+            isPaused = false;
+            selectedChapter = null;
+            document.getElementById('dialogue-encouragement').style.display = 'none';
+            document.getElementById('chapter-list').style.display = 'block';
+            document.getElementById('dialogue-container').classList.remove('active');
+        }
+
+        function getVoicesForLanguage(lang) {
+            const voices = window.speechSynthesis.getVoices();
+            const targetLang = languageConfig[lang].speechCode;
+
+            // Try to find voices for the target language
+            const langVoices = voices.filter(v => v.lang.startsWith(targetLang.split('-')[0]));
+
+            // Fallback to any available voices if no language-specific voices found
+            const availableVoices = langVoices.length > 0 ? langVoices : voices;
+
+            // Return two different voices if available, otherwise same voice
+            if (availableVoices.length >= 2) {
+                return {
+                    voice1: availableVoices[0],
+                    voice2: availableVoices[1]
+                };
+            } else if (availableVoices.length === 1) {
+                return {
+                    voice1: availableVoices[0],
+                    voice2: availableVoices[0]
+                };
+            }
+            return { voice1: null, voice2: null };
+        }
+
+        function stripMarkdown(text) {
+            // Remove markdown formatting: **bold**, *italic*, - bullets, reference markers, etc.
+            return text
+                .replace(/\*\*([^*]+)\*\*/g, '$1')  // **bold**
+                .replace(/\*([^*]+)\*/g, '$1')      // *italic*
+                .replace(/\[\d+\]/g, '')            // reference markers [1], [2], etc.
+                .replace(/^- /gm, '')               // bullet points at line start
+                .replace(/^[-*] /gm, '');           // other list markers
+        }
+
+        function playSelectedDialogue() {
+            if (selectedChapter === null) return;
+            if (!('speechSynthesis' in window)) {
+                const text = languageConfig[currentLang].ui;
+                alert(text.browserNoSpeech);
+                return;
+            }
+
+            stopSpeaking();
+            isPaused = false;
+            currentUtteranceIndex = 0;
+            allUtterances = [];
+
+            // Get voices and speaker configuration for current language
+            const voices = getVoicesForLanguage(currentLang);
+            const config = languageConfig[currentLang];
+
+            const chapter = chapters[selectedChapter];
+            chapter.lines.forEach((line, lineIdx) => {
+                const cleanText = stripMarkdown(line.text);
+                const utterance = new SpeechSynthesisUtterance(cleanText);
+                utterance.lang = config.speechCode;
+                utterance.rate = 0.95;
+
+                // Select voice based on speaker
+                // First speaker gets voice1 with lower pitch
+                // Second speaker gets voice2 with higher pitch
+                if (line.speaker === config.speakers.first && voices.voice1) {
+                    utterance.voice = voices.voice1;
+                    utterance.pitch = 0.95; // Lower pitch for contrast
+                } else if (line.speaker === config.speakers.second && voices.voice2) {
+                    utterance.voice = voices.voice2;
+                    utterance.pitch = 1.15; // Higher pitch for contrast
+                }
+
+                utterance.onstart = () => {
+                    currentUtteranceIndex = lineIdx;
+                    highlightLine(lineIdx);
+                };
+
+                allUtterances.push(utterance);
+                window.speechSynthesis.speak(utterance);
+            });
+
+            updatePauseButton();
+        }
+
+        // Pause/resume workaround for speechSynthesis compatibility
+        // Observed behavior: On some browsers (tested on mobile Chrome), speechSynthesis.pause()
+        // does not actually pause playback - speechSynthesis.paused remains false and audio continues.
+        // Similarly, speechSynthesis.resume() has no effect because paused state was never true.
+        // Desktop Chrome: pause()/resume() work correctly using isPaused variable tracking.
+        // Mobile Chrome: pause()/resume() API calls are accepted but have no effect on playback.
+        // Workaround: Use cancel() to stop, then replay from currentUtteranceIndex.
+        // Limitation: This loses position within the current utterance (restarts from beginning of that line).
+        let isPaused = false;
+        let currentUtteranceIndex = 0;  // Index of currently speaking utterance (updated in onstart callback)
+        let allUtterances = [];          // Array of all utterance objects for replay after cancel
+
+        function togglePause() {
+            if (!('speechSynthesis' in window)) return;
+
+            if (isPaused) {
+                // Resume: Cancel any residual state, then replay from saved position
+                window.speechSynthesis.cancel();
+                isPaused = false;
+
+                // Replay all utterances from currentUtteranceIndex onwards
+                // Note: Restarts from beginning of the utterance that was "paused"
+                for (let i = currentUtteranceIndex; i < allUtterances.length; i++) {
+                    window.speechSynthesis.speak(allUtterances[i]);
+                }
+            } else if (window.speechSynthesis.speaking) {
+                // Pause: Use cancel() because pause() doesn't work on all browsers
+                window.speechSynthesis.cancel();
+                isPaused = true;
+            }
+
+            updatePauseButton();
+        }
+
+        function updatePauseButton() {
+            const btn = document.getElementById('pause-button');
+            const text = languageConfig[currentLang].ui;
+            if (btn) {
+                if (isPaused) {
+                    btn.textContent = text.resume;
+                } else {
+                    btn.textContent = text.pause;
+                }
+            }
+        }
+
+        function stopSpeaking() {
+            if ('speechSynthesis' in window) {
+                window.speechSynthesis.cancel();
+                isPaused = false;
+                currentUtteranceIndex = 0;
+                allUtterances = [];
+                updatePauseButton();
+            }
+        }
+
+        function highlightLine(lineIdx) {
+            // Remove previous highlights
+            document.querySelectorAll('.dialogue-line').forEach(el => {
+                el.classList.remove('highlight');
+            });
+
+            // Highlight current line
+            const lineEl = document.getElementById(`line-${lineIdx}`);
+            if (lineEl) {
+                lineEl.classList.add('highlight');
+                lineEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+        }
+
+        // Initialize language and load content on page load
+        (function init() {
+            // Get language from URL or default to Polish
+            currentLang = getURLLanguage();
+
+            // Set dropdown selection
+            document.getElementById('lang-dropdown').value = currentLang;
+
+            // Update UI text
+            updateUIText();
+
+            // Load content
+            loadREADME();
+        })();
+
+        // Tab switching
+        function showTab(tabName) {
+            document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+
+            event.target.classList.add('active');
+            document.getElementById(tabName + '-tab').classList.add('active');
+        }
+
+        // Quiz functionality
+        let selectedQuizChapter = null;
+        let userAnswers = {};
+
+        function displayQuizChapterList() {
+            const text = languageConfig[currentLang].ui;
+            let html = `<h2>${text.selectQuizChapter}</h2>`;
+            chapters.forEach((chapter, chapterIndex) => {
+                if (chapter.questions && chapter.questions.length > 0) {
+                    html += `<div class="chapter-item" onclick="selectQuizChapter(${chapterIndex})">`;
+                    html += `<div class="chapter-title">${chapter.title}</div>`;
+                    html += `<div>${text.numQuestions} ${chapter.questions.length}</div>`;
+                    html += `</div>`;
+                }
+            });
+            document.getElementById('quiz-chapter-list').innerHTML = html;
+        }
+
+        function selectQuizChapter(chapterIndex, preserveAnswers = false) {
+            selectedQuizChapter = chapterIndex;
+            if (!preserveAnswers) {
+                userAnswers = {};
+            }
+            const chapter = chapters[chapterIndex];
+            const text = languageConfig[currentLang].ui;
+            const keywords = languageConfig[currentLang].keywords;
+
+            // Update quiz controls
+            const backButton = document.querySelector('#quiz-container .back-button');
+            if (backButton) {
+                backButton.textContent = text.backToChapters;
+            }
+            const submitButton = document.querySelector('.submit-quiz button');
+            if (submitButton) {
+                submitButton.textContent = text.checkAnswers;
+            }
+
+            let html = `<h2>${chapter.title}</h2>`;
+
+            chapter.questions.forEach((question, questionIndex) => {
+                html += `<div class="quiz-question" id="question-${questionIndex}">`;
+                html += `<div class="question-text">${questionIndex + 1}. ${question.question}</div>`;
+
+                if (question.type === keywords.trueFalseType) {
+                    html += `<label class="answer-option" id="answer-${questionIndex}-0">`;
+                    html += `<input type="radio" name="q${questionIndex}" value="true" onchange="recordAnswer(${questionIndex}, 'true')"> ${text.quizTrue}`;
+                    html += `</label>`;
+                    html += `<label class="answer-option" id="answer-${questionIndex}-1">`;
+                    html += `<input type="radio" name="q${questionIndex}" value="false" onchange="recordAnswer(${questionIndex}, 'false')"> ${text.quizFalse}`;
+                    html += `</label>`;
+                } else if (question.type === keywords.multipleChoiceType) {
+                    question.answers.forEach((answer, answerIndex) => {
+                        html += `<label class="answer-option" id="answer-${questionIndex}-${answerIndex}">`;
+                        html += `<input type="checkbox" name="q${questionIndex}" value="${answerIndex}" onchange="recordAnswer(${questionIndex}, ${answerIndex}, true)"> ${answer}`;
+                        html += `</label>`;
+                    });
+                }
+
+                html += `<div class="rationale" id="rationale-${questionIndex}"></div>`;
+                html += `</div>`;
+            });
+
+            document.getElementById('quiz-content').innerHTML = html;
+            document.getElementById('quiz-chapter-list').style.display = 'none';
+            document.getElementById('quiz-container').style.display = 'block';
+            updateQuizScore();
+        }
+
+        function recordAnswer(questionIndex, value, isCheckbox = false) {
+            if (isCheckbox) {
+                if (!userAnswers[questionIndex]) {
+                    userAnswers[questionIndex] = [];
+                }
+                const valueNum = parseInt(value);
+                const existingIndex = userAnswers[questionIndex].indexOf(valueNum);
+                if (existingIndex > -1) {
+                    userAnswers[questionIndex].splice(existingIndex, 1);
+                } else {
+                    userAnswers[questionIndex].push(valueNum);
+                }
+            } else {
+                if (value === 'true' || value === 'false') {
+                    userAnswers[questionIndex] = value === 'true';
+                } else {
+                    userAnswers[questionIndex] = parseInt(value);
+                }
+            }
+        }
+
+        function checkAnswers() {
+            if (selectedQuizChapter === null) return;
+
+            const chapter = chapters[selectedQuizChapter];
+            const text = languageConfig[currentLang].ui;
+            const keywords = languageConfig[currentLang].keywords;
+            let correct = 0;
+            let total = chapter.questions.length;
+
+            chapter.questions.forEach((question, questionIndex) => {
+                const questionDiv = document.getElementById(`question-${questionIndex}`);
+                const rationaleDiv = document.getElementById(`rationale-${questionIndex}`);
+                const userAnswer = userAnswers[questionIndex];
+
+                let isCorrect = false;
+
+                if (question.type === keywords.trueFalseType) {
+                    isCorrect = userAnswer === question.correct[0];
+
+                    // Highlight answers
+                    const trueOption = document.getElementById(`answer-${questionIndex}-0`);
+                    const falseOption = document.getElementById(`answer-${questionIndex}-1`);
+
+                    if (question.correct[0]) {
+                        trueOption.classList.add('correct');
+                        if (userAnswer === false) falseOption.classList.add('incorrect');
+                    } else {
+                        falseOption.classList.add('correct');
+                        if (userAnswer === true) trueOption.classList.add('incorrect');
+                    }
+
+                    rationaleDiv.innerHTML = convertMarkdownFormatting(question.rationale);
+                    rationaleDiv.classList.add('show');
+
+                } else if (question.type === keywords.multipleChoiceType) {
+                    const userAnswerArray = Array.isArray(userAnswer) ? userAnswer : [userAnswer];
+                    const correctArray = question.correct;
+
+                    isCorrect = userAnswerArray.length === correctArray.length &&
+                                userAnswerArray.every(answer => correctArray.includes(answer));
+
+                    // Highlight answers
+                    question.answers.forEach((answer, answerIndex) => {
+                        const answerOption = document.getElementById(`answer-${questionIndex}-${answerIndex}`);
+                        if (correctArray.includes(answerIndex)) {
+                            answerOption.classList.add('correct');
+                        }
+                        if (userAnswerArray.includes(answerIndex) && !correctArray.includes(answerIndex)) {
+                            answerOption.classList.add('incorrect');
+                        }
+                    });
+
+                    // Show all rationales
+                    let rationaleText = '';
+                    question.rationales.forEach((rationale) => {
+                        rationaleText += `${convertMarkdownFormatting(rationale)}<br><br>`;
+                    });
+                    rationaleDiv.innerHTML = rationaleText;
+                    rationaleDiv.classList.add('show');
+                }
+
+                if (isCorrect) {
+                    correct++;
+                    questionDiv.classList.add('answered-correct');
+                } else {
+                    questionDiv.classList.add('answered-incorrect');
+                }
+            });
+
+            const scoreDiv = document.getElementById('quiz-score');
+            scoreDiv.innerHTML = `<strong>${text.score}</strong> ${correct} / ${total} ${text.correct}`;
+        }
+
+        function updateQuizScore() {
+            const text = languageConfig[currentLang].ui;
+            const scoreDiv = document.getElementById('quiz-score');
+            scoreDiv.innerHTML = `<strong>${text.answerThenCheck}</strong>`;
+        }
+
+        function showQuizChapterList() {
+            selectedQuizChapter = null;
+            userAnswers = {};
+            document.getElementById('quiz-chapter-list').style.display = 'block';
+            document.getElementById('quiz-container').style.display = 'none';
+        }
+    </script>
+</body>
+</html>
